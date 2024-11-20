@@ -175,6 +175,12 @@ class PushTImageRunner(BaseImageRunner):
 
             # start rollout
             obs = env.reset()
+
+            pipeline_degree = 4
+            obs_list = [obs] * pipeline_degree
+
+            print("obs agent_pos: ", obs['agent_pos'].shape)
+            print("obs image: ", obs['image'].shape)
             past_action = None
             policy.reset()
 
@@ -182,21 +188,29 @@ class PushTImageRunner(BaseImageRunner):
                 leave=False, mininterval=self.tqdm_interval_sec)
             done = False
             while not done:
-                # create obs dict
-                np_obs_dict = dict(obs)
-                if self.past_action and (past_action is not None):
-                    # TODO: not tested
-                    np_obs_dict['past_action'] = past_action[
-                        :,-(self.n_obs_steps-1):].astype(np.float32)
-                
-                # device transfer
-                obs_dict = dict_apply(np_obs_dict, 
-                    lambda x: torch.from_numpy(x).to(
-                        device=device))
+                obs_dict_list = []
 
-                # run policy
+                for obs in obs_list:
+                    np_obs_dict = dict(obs)
+                    obs_dict_list.append(dict_apply(np_obs_dict, 
+                        lambda x: torch.from_numpy(x).to(
+                            device=device)))
+
+                # ths_obs = obs_list[0]
+                # # create obs dict
+                # np_obs_dict = dict(ths_obs)
+                
+                # # device transfer
+                # obs_dict = dict_apply(np_obs_dict, 
+                #     lambda x: torch.from_numpy(x).to(
+                #         device=device))
+
+                # # run policy
+                # with torch.no_grad():
+                #     action_dict = policy.predict_action(obs_dict)
+            
                 with torch.no_grad():
-                    action_dict = policy.predict_action(obs_dict)
+                    action_dict = policy.predict_action_v2(obs_dict_list)
 
                 # device_transfer
                 np_action_dict = dict_apply(action_dict,
@@ -206,6 +220,8 @@ class PushTImageRunner(BaseImageRunner):
 
                 # step env
                 obs, reward, done, info = env.step(action)
+                # cyclic array
+                obs_list = obs_list[1:] + [obs]
                 done = np.all(done)
                 past_action = action
 
@@ -214,6 +230,8 @@ class PushTImageRunner(BaseImageRunner):
             pbar.close()
 
             all_video_paths[this_global_slice] = env.render()[this_local_slice]
+            print("this_global_slice: ", this_global_slice)
+            print("this_local_slice: ", this_local_slice)
             all_rewards[this_global_slice] = env.call('get_attr', 'reward')[this_local_slice]
         # clear out video buffer
         _ = env.reset()
@@ -229,6 +247,7 @@ class PushTImageRunner(BaseImageRunner):
         # to completely reproduce reported numbers, uncomment this line:
         # for i in range(len(self.env_fns)):
         # and comment out this line
+        print("n_inits: ", n_inits)
         for i in range(n_inits):
             seed = self.env_seeds[i]
             prefix = self.env_prefixs[i]
@@ -239,6 +258,7 @@ class PushTImageRunner(BaseImageRunner):
             # visualize sim
             video_path = all_video_paths[i]
             if video_path is not None:
+                print(video_path)
                 sim_video = wandb.Video(video_path)
                 log_data[prefix+f'sim_video_{seed}'] = sim_video
 

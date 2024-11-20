@@ -218,6 +218,109 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
 
         return trajectory
 
+    # ========= inference  ============
+    def conditional_sample_v2(self, 
+            condition_data, condition_mask,
+            cond=None, generator=None,
+            # keyword arguments to scheduler.step
+            **kwargs
+            ):
+        model = self.model
+        scheduler = self.noise_scheduler
+
+        trajectory = torch.randn(
+            size=condition_data.shape, 
+            dtype=condition_data.dtype,
+            device=condition_data.device,
+            generator=generator)
+    
+        # set step values
+        scheduler.set_timesteps(self.num_inference_steps)
+
+        # print("scheduler.timesteps: ", scheduler.timesteps)
+        for t in scheduler.timesteps:
+            # 1. apply conditioning
+            trajectory[condition_mask] = condition_data[condition_mask]
+
+            # 2. predict model output
+            if t > 50:
+                model_output = model(trajectory, t, cond[-2])
+            else:
+                model_output = model(trajectory, t, cond[-1])
+
+            # 3. compute previous image: x_t -> x_t-1
+            trajectory = scheduler.step(
+                model_output, t, trajectory, 
+                generator=generator,
+                **kwargs
+                ).prev_sample
+        
+        # finally make sure conditioning is enforced
+        trajectory[condition_mask] = condition_data[condition_mask]        
+
+        return trajectory
+
+    def predict_action_v2(self, obs_dict_list) -> Dict[str, torch.Tensor]:
+        """
+        obs_dict: must include "obs" key
+        result: must include "action" key
+        """
+        # normalize input
+        nobs = self.normalizer.normalize(obs_dict_list[0])
+        value = next(iter(nobs.values()))
+        B, To = value.shape[:2]
+        T = self.horizon
+        Da = self.action_dim
+        Do = self.obs_feature_dim
+        To = self.n_obs_steps
+
+        # build input
+        device = self.device
+        dtype = self.dtype
+
+        # handle different ways of passing observation
+        cond = None
+        cond_data = None
+        cond_mask = None
+        cond_list = []
+        for obs_dict in obs_dict_list:
+            nobs = self.normalizer.normalize(obs_dict)
+            this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
+            # print("this_nobs: ", this_nobs.shape)
+            nobs_features = self.obs_encoder(this_nobs)
+            # reshape back to B, To, Do
+            cond = nobs_features.reshape(B, To, -1)
+            cond_list.append(cond)
+            shape = (B, T, Da)
+            if self.pred_action_steps_only:
+                shape = (B, self.n_action_steps, Da)
+            cond_data = torch.zeros(size=shape, device=device, dtype=dtype)
+            cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
+
+        # run sampling
+        nsample = self.conditional_sample_v2(
+            cond_data, 
+            cond_mask,
+            cond=cond_list,
+            **self.kwargs)
+        
+        # unnormalize prediction
+        naction_pred = nsample[...,:Da]
+        action_pred = self.normalizer['action'].unnormalize(naction_pred)
+
+        # get action
+        if self.pred_action_steps_only:
+            action = action_pred
+        else:
+            start = To - 1
+            end = start + self.n_action_steps
+            action = action_pred[:,start:end]
+        
+        result = {
+            'action': action,
+            'action_pred': action_pred
+        }
+        return result
 
     def predict_action(self, obs_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
