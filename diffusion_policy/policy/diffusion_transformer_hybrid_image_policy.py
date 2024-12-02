@@ -1,4 +1,5 @@
 from typing import Dict, Tuple
+import os
 import math
 import torch
 import torch.nn as nn
@@ -139,6 +140,21 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         output_dim = input_dim
         cond_dim = obs_feature_dim if obs_as_cond else 0
 
+        print("input_dim: ", input_dim)
+        print("output_dim: ", output_dim)
+        print("horizon: ", horizon)
+        print("n_obs_steps: ", n_obs_steps)
+        print("cond_dim: ", cond_dim)
+        print("n_layer: ", n_layer)
+        print("n_head: ", n_head)
+        print("n_emb: ", n_emb)
+        print("p_drop_emb: ", p_drop_emb)
+        print("p_drop_attn: ", p_drop_attn)
+        print("causal_attn: ", causal_attn)
+        print("time_as_cond: ", time_as_cond)
+        print("obs_as_cond: ", obs_as_cond)
+        print("n_cond_layers: ", n_cond_layers)
+
         model = TransformerForDiffusion(
             input_dim=input_dim,
             output_dim=output_dim,
@@ -237,16 +253,36 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         # set step values
         scheduler.set_timesteps(self.num_inference_steps)
 
+        # print("trajectory: ", trajectory.shape)
+        # print("cond: ", cond[0].shape)
+
         # print("scheduler.timesteps: ", scheduler.timesteps)
         for t in scheduler.timesteps:
             # 1. apply conditioning
             trajectory[condition_mask] = condition_data[condition_mask]
 
             # 2. predict model output
-            if t > 50:
-                model_output = model(trajectory, t, cond[-2])
-            else:
-                model_output = model(trajectory, t, cond[-1])
+            # print("--", os.getenv('CONTEXT_UPDATE'))
+            # print("==", os.getenv('PIPE_DEGREE'))
+            context_update = int(os.getenv('CONTEXT_UPDATE', 1))
+            pipeline_degree = int(os.getenv('PIPE_DEGREE', 1))
+            if context_update == 1:    
+                # with context update
+                stages = {  1: [0],
+                            2: [51, 0],
+                            3: [67, 34, 0],
+                            4: [75, 50, 25, 0],
+                            5: [80, 60, 40, 20, 0],
+                            6: [83, 66, 50, 34, 17, 0],
+                        }
+                for j, stage in enumerate(stages[pipeline_degree]):
+                    if t >= stage:
+                        model_output = model(trajectory, t, cond[-(pipeline_degree-j)])
+                        break
+            else: 
+                # without context update
+                model_output = model(trajectory, t, cond[0])
+
 
             # 3. compute previous image: x_t -> x_t-1
             trajectory = scheduler.step(
@@ -286,8 +322,9 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         for obs_dict in obs_dict_list:
             nobs = self.normalizer.normalize(obs_dict)
             this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
-            # print("this_nobs: ", this_nobs.shape)
+            # print("this_nobs: ", this_nobs['image'].shape)
             nobs_features = self.obs_encoder(this_nobs)
+            # print("nobs_features: ", nobs_features.shape)
             # reshape back to B, To, Do
             cond = nobs_features.reshape(B, To, -1)
             cond_list.append(cond)

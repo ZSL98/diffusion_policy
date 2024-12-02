@@ -1,4 +1,5 @@
 from typing import Dict
+import os
 import math
 import torch
 import torch.nn as nn
@@ -134,6 +135,14 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
             input_dim = action_dim
             global_cond_dim = obs_feature_dim * n_obs_steps
 
+        print("input_dim: ", input_dim)
+        print("global_cond_dim: ", global_cond_dim)
+        print("diffusion_step_embed_dim: ", diffusion_step_embed_dim)
+        print("down_dims: ", down_dims)
+        print("kernel_size: ", kernel_size)
+        print("n_groups: ", n_groups)
+        print("cond_predict_scale: ", cond_predict_scale)
+
         model = ConditionalUnet1D(
             input_dim=input_dim,
             local_cond_dim=None,
@@ -210,6 +219,125 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
         trajectory[condition_mask] = condition_data[condition_mask]        
 
         return trajectory
+
+    # ========= inference  ============
+    def conditional_sample_v2(self, 
+            condition_data, condition_mask,
+            local_cond=None, global_cond=None,
+            generator=None,
+            # keyword arguments to scheduler.step
+            **kwargs
+            ):
+        model = self.model
+        scheduler = self.noise_scheduler
+
+        trajectory = torch.randn(
+            size=condition_data.shape, 
+            dtype=condition_data.dtype,
+            device=condition_data.device,
+            generator=generator)
+    
+        # set step values
+        scheduler.set_timesteps(self.num_inference_steps)
+
+        print("trajectory: ", trajectory.shape)
+        print("global_cond: ", global_cond[0].shape)
+
+        for t in scheduler.timesteps:
+            # 1. apply conditioning
+            trajectory[condition_mask] = condition_data[condition_mask]
+
+            # 2. predict model output
+            context_update = int(os.getenv('CONTEXT_UPDATE', 1))
+            pipeline_degree = int(os.getenv('PIPE_DEGREE', 1))
+            if context_update == 1:    
+                # with context update
+                stages = {  1: [0],
+                            2: [51, 0],
+                            3: [67, 34, 0],
+                            4: [75, 50, 25, 0],
+                            5: [80, 60, 40, 20, 0],
+                            6: [83, 66, 50, 34, 17, 0],
+                        }
+                for j, stage in enumerate(stages[pipeline_degree]):
+                    if t >= stage:
+                        model_output = model(trajectory, t, local_cond=local_cond, global_cond=global_cond[-(pipeline_degree-j)])
+                        break
+            else: 
+                # without context update
+                model_output = model(trajectory, t, 
+                    local_cond=local_cond, global_cond=global_cond[0])
+
+            # 3. compute previous image: x_t -> x_t-1
+            trajectory = scheduler.step(
+                model_output, t, trajectory, 
+                generator=generator,
+                **kwargs
+                ).prev_sample
+        
+        # finally make sure conditioning is enforced
+        trajectory[condition_mask] = condition_data[condition_mask]        
+
+        return trajectory
+
+    def predict_action_v2(self, obs_dict_list) -> Dict[str, torch.Tensor]:
+        """
+        obs_dict: must include "obs" key
+        result: must include "action" key
+        """
+        # normalize input
+        nobs = self.normalizer.normalize(obs_dict_list[0])
+        value = next(iter(nobs.values()))
+        B, To = value.shape[:2]
+        T = self.horizon
+        Da = self.action_dim
+        Do = self.obs_feature_dim
+        To = self.n_obs_steps
+
+        # build input
+        device = self.device
+        dtype = self.dtype
+
+        # handle different ways of passing observation
+        local_cond = None
+        global_cond = None
+        global_cond_list = []
+        for obs_dict in obs_dict_list:
+            # condition through global feature
+            nobs = self.normalizer.normalize(obs_dict)
+            this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
+            print("this_nobs: ", this_nobs['image'].shape)
+            nobs_features = self.obs_encoder(this_nobs)
+            print("nobs_features: ", nobs_features.shape)
+            # reshape back to B, Do
+            global_cond = nobs_features.reshape(B, -1)
+            global_cond_list.append(global_cond)
+            # empty data for action
+            cond_data = torch.zeros(size=(B, T, Da), device=device, dtype=dtype)
+            cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
+
+        # run sampling
+        nsample = self.conditional_sample_v2(
+            cond_data, 
+            cond_mask,
+            local_cond=local_cond,
+            global_cond=global_cond_list,
+            **self.kwargs)
+        
+        # unnormalize prediction
+        naction_pred = nsample[...,:Da]
+        action_pred = self.normalizer['action'].unnormalize(naction_pred)
+
+        # get action
+        start = To - 1
+        end = start + self.n_action_steps
+        action = action_pred[:,start:end]
+        
+        result = {
+            'action': action,
+            'action_pred': action_pred
+        }
+        return result
 
 
     def predict_action(self, obs_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:

@@ -1,3 +1,4 @@
+import os
 import wandb
 import numpy as np
 import torch
@@ -176,11 +177,11 @@ class PushTImageRunner(BaseImageRunner):
             # start rollout
             obs = env.reset()
 
-            pipeline_degree = 4
+            pipeline_degree = int(os.getenv('PIPE_DEGREE', 1))
             obs_list = [obs] * pipeline_degree
 
-            print("obs agent_pos: ", obs['agent_pos'].shape)
-            print("obs image: ", obs['image'].shape)
+            # print("obs agent_pos: ", obs['agent_pos'].shape)
+            # print("obs image: ", obs['image'].shape)
             past_action = None
             policy.reset()
 
@@ -190,22 +191,22 @@ class PushTImageRunner(BaseImageRunner):
             while not done:
                 obs_dict_list = []
 
-                for obs in obs_list:
-                    np_obs_dict = dict(obs)
+                for obse in obs_list:
+                    np_obs_dict = dict(obse)
                     obs_dict_list.append(dict_apply(np_obs_dict, 
                         lambda x: torch.from_numpy(x).to(
                             device=device)))
 
                 # ths_obs = obs_list[0]
                 # # create obs dict
-                # np_obs_dict = dict(ths_obs)
+                np_obs_dict = dict(obs)
                 
-                # # device transfer
-                # obs_dict = dict_apply(np_obs_dict, 
-                #     lambda x: torch.from_numpy(x).to(
-                #         device=device))
+                # device transfer
+                obs_dict = dict_apply(np_obs_dict, 
+                    lambda x: torch.from_numpy(x).to(
+                        device=device))
 
-                # # run policy
+                # run policy
                 # with torch.no_grad():
                 #     action_dict = policy.predict_action(obs_dict)
             
@@ -230,8 +231,8 @@ class PushTImageRunner(BaseImageRunner):
             pbar.close()
 
             all_video_paths[this_global_slice] = env.render()[this_local_slice]
-            print("this_global_slice: ", this_global_slice)
-            print("this_local_slice: ", this_local_slice)
+            # print("this_global_slice: ", this_global_slice)
+            # print("this_local_slice: ", this_local_slice)
             all_rewards[this_global_slice] = env.call('get_attr', 'reward')[this_local_slice]
         # clear out video buffer
         _ = env.reset()
@@ -247,7 +248,6 @@ class PushTImageRunner(BaseImageRunner):
         # to completely reproduce reported numbers, uncomment this line:
         # for i in range(len(self.env_fns)):
         # and comment out this line
-        print("n_inits: ", n_inits)
         for i in range(n_inits):
             seed = self.env_seeds[i]
             prefix = self.env_prefixs[i]
@@ -258,7 +258,6 @@ class PushTImageRunner(BaseImageRunner):
             # visualize sim
             video_path = all_video_paths[i]
             if video_path is not None:
-                print(video_path)
                 sim_video = wandb.Video(video_path)
                 log_data[prefix+f'sim_video_{seed}'] = sim_video
 
@@ -267,5 +266,5 @@ class PushTImageRunner(BaseImageRunner):
             name = prefix+'mean_score'
             value = np.mean(value)
             log_data[name] = value
-
+            wandb.log({prefix[:-1]: {"pipeline_degree":pipeline_degree, "accuracy":value}})
         return log_data
