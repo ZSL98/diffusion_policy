@@ -21,8 +21,9 @@ from diffusion_policy.workspace.base_workspace import BaseWorkspace
 @click.command()
 @click.option('-c', '--checkpoint', required=True)
 @click.option('-o', '--output_dir', required=True)
+@click.option('-r', '--run_id', required=True)
 @click.option('-d', '--device', default='cuda:0')
-def main(checkpoint, output_dir, device):
+def main(checkpoint, output_dir, run_id, device):
     # if os.path.exists(output_dir):
     #     click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
     pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -32,12 +33,14 @@ def main(checkpoint, output_dir, device):
     cfg = payload['cfg']
     # cfg.task.env_runner.max_steps = 10
     # cfg.policy.num_inference_steps = 10
-    # cfg.task.env_runner.n_train = 10
+    # cfg.task.env_runner.n_test = 50
     cls = hydra.utils.get_class(cfg._target_)
     workspace = cls(cfg, output_dir=output_dir)
     workspace: BaseWorkspace
     workspace.load_payload(payload, exclude_keys=None, include_keys=None)
     
+    print("--", os.getenv('CONTEXT_UPDATE'))
+    wandb.init(project="diffusion_policy", name=cfg.task_name+"-"+cfg.name, id=run_id, resume="allow")
     # get policy from workspace
     policy = workspace.model
     if cfg.training.use_ema:
