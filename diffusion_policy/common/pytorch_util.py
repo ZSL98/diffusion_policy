@@ -2,6 +2,18 @@ from typing import Dict, Callable, List
 import collections
 import torch
 import torch.nn as nn
+import numpy as np
+
+def split_with_skew(N, M, alpha):
+    weights = np.exp(alpha * np.arange(1, M + 1))
+    normalized_weights = weights / weights.sum() * N
+    parts = np.round(normalized_weights).astype(int)
+    diff = N - parts.sum()
+    for i in range(abs(diff)):
+        parts[i % M] += np.sign(diff)
+    accumulated = [0] + list(np.cumsum(parts))
+    reversed_accumulated = accumulated[::-1]
+    return reversed_accumulated[1:]
 
 def dict_apply(
         x: Dict[str, torch.Tensor], 

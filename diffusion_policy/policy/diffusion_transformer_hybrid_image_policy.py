@@ -17,7 +17,7 @@ from robomimic.algo.algo import PolicyAlgo
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.models.base_nets as rmbn
 import diffusion_policy.model.vision.crop_randomizer as dmvc
-from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
+from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules, split_with_skew
 
 
 class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
@@ -264,18 +264,21 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
             # 2. predict model output
             # print("--", os.getenv('CONTEXT_UPDATE'))
             # print("==", os.getenv('PIPE_DEGREE'))
-            context_update = int(os.getenv('CONTEXT_UPDATE', 1))
+            context_update = int(os.getenv('CONTEXT_UPDATE', 0))
             pipeline_degree = int(os.getenv('PIPE_DEGREE', 1))
+            inference_step = int(os.getenv('INF_STEP', 100))
+            skewness = float(os.getenv('SKEW', 0.0))
             if context_update == 1:    
                 # with context update
-                stages = {  1: [0],
-                            2: [51, 0],
-                            3: [67, 34, 0],
-                            4: [75, 50, 25, 0],
-                            5: [80, 60, 40, 20, 0],
-                            6: [83, 66, 50, 34, 17, 0],
-                        }
-                for j, stage in enumerate(stages[pipeline_degree]):
+                step_stage = split_with_skew(inference_step, pipeline_degree, skewness)
+                # stages = {  1: [0],
+                #             2: [51, 0],
+                #             3: [67, 34, 0],
+                #             4: [75, 50, 25, 0],
+                #             5: [80, 60, 40, 20, 0],
+                #             6: [83, 66, 50, 34, 17, 0],
+                #         }
+                for j, stage in enumerate(step_stage):
                     if t >= stage:
                         model_output = model(trajectory, t, cond[-(pipeline_degree-j)])
                         break

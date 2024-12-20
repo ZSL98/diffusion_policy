@@ -17,7 +17,7 @@ from robomimic.algo.algo import PolicyAlgo
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.models.base_nets as rmbn
 import diffusion_policy.model.vision.crop_randomizer as dmvc
-from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
+from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules, split_with_skew
 
 
 class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
@@ -240,26 +240,30 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
         # set step values
         scheduler.set_timesteps(self.num_inference_steps)
 
-        print("trajectory: ", trajectory.shape)
-        print("global_cond: ", global_cond[0].shape)
+        # print("trajectory: ", trajectory.shape)
+        # print("global_cond: ", global_cond[0].shape)
 
         for t in scheduler.timesteps:
             # 1. apply conditioning
             trajectory[condition_mask] = condition_data[condition_mask]
 
             # 2. predict model output
-            context_update = int(os.getenv('CONTEXT_UPDATE', 1))
+            context_update = int(os.getenv('CONTEXT_UPDATE', 0))
             pipeline_degree = int(os.getenv('PIPE_DEGREE', 1))
+            inference_step = int(os.getenv('INF_STEP', 100))
+            skewness = float(os.getenv('SKEW', 0.0))
             if context_update == 1:    
                 # with context update
-                stages = {  1: [0],
-                            2: [51, 0],
-                            3: [67, 34, 0],
-                            4: [75, 50, 25, 0],
-                            5: [80, 60, 40, 20, 0],
-                            6: [83, 66, 50, 34, 17, 0],
-                        }
-                for j, stage in enumerate(stages[pipeline_degree]):
+                step_stage = split_with_skew(inference_step, pipeline_degree, skewness)
+                # print(step_stage)
+                # stages = {  1: [0],
+                #             2: [51, 0],
+                #             3: [67, 34, 0],
+                #             4: [75, 50, 25, 0],
+                #             5: [80, 60, 40, 20, 0],
+                #             6: [83, 66, 50, 34, 17, 0],
+                #         }
+                for j, stage in enumerate(step_stage):
                     if t >= stage:
                         model_output = model(trajectory, t, local_cond=local_cond, global_cond=global_cond[-(pipeline_degree-j)])
                         break
@@ -306,9 +310,14 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
             # condition through global feature
             nobs = self.normalizer.normalize(obs_dict)
             this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
-            print("this_nobs: ", this_nobs['image'].shape)
+            # print("this_nobs: ", this_nobs['image'].shape)
+            # print("agentview_image: ", this_nobs['agentview_image'].shape)
+            # print("robot0_eye_in_hand_image: ", this_nobs['robot0_eye_in_hand_image'].shape)
+            # print("robot0_eef_pos: ", this_nobs['robot0_eef_pos'].shape)
+            # print("robot0_eef_quat: ", this_nobs['robot0_eef_quat'].shape)
+            # print("robot0_gripper_qpos: ", this_nobs['robot0_gripper_qpos'].shape)
             nobs_features = self.obs_encoder(this_nobs)
-            print("nobs_features: ", nobs_features.shape)
+            # print("nobs_features: ", nobs_features.shape)
             # reshape back to B, Do
             global_cond = nobs_features.reshape(B, -1)
             global_cond_list.append(global_cond)

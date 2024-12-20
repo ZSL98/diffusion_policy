@@ -31,8 +31,10 @@ def main(checkpoint, output_dir, run_id, device):
     # load checkpoint
     payload = torch.load(open(checkpoint, 'rb'), pickle_module=dill)
     cfg = payload['cfg']
+    # print(cfg.policy.num_inference_steps)
+    # print(cfg)
     # cfg.task.env_runner.max_steps = 10
-    # cfg.policy.num_inference_steps = 10
+    cfg.policy.num_inference_steps = int(os.getenv('INF_STEP', 100))
     # cfg.task.env_runner.n_test = 50
     cls = hydra.utils.get_class(cfg._target_)
     workspace = cls(cfg, output_dir=output_dir)
@@ -40,7 +42,7 @@ def main(checkpoint, output_dir, run_id, device):
     workspace.load_payload(payload, exclude_keys=None, include_keys=None)
     
     print("--", os.getenv('CONTEXT_UPDATE'))
-    wandb.init(project="diffusion_policy", name=cfg.task_name+"-"+cfg.name, id=run_id, resume="allow")
+    # wandb.init(project="diffusion_policy", name=cfg.task_name+"-"+cfg.name, id=run_id, resume="allow")
     # get policy from workspace
     policy = workspace.model
     if cfg.training.use_ema:

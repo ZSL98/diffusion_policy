@@ -268,6 +268,11 @@ class RobomimicImageRunner(BaseImageRunner):
 
             # start rollout
             obs = env.reset()
+            pipeline_degree = int(os.getenv('PIPE_DEGREE', 1))
+            obs_list = [obs] * pipeline_degree
+
+            # print("obs agent_pos: ", obs['agent_pos'].shape)
+            # print("obs image: ", obs['image'].shape)
             past_action = None
             policy.reset()
 
@@ -277,12 +282,16 @@ class RobomimicImageRunner(BaseImageRunner):
             
             done = False
             while not done:
+                obs_dict_list = []
+
+                for obse in obs_list:
+                    np_obs_dict = dict(obse)
+                    obs_dict_list.append(dict_apply(np_obs_dict, 
+                        lambda x: torch.from_numpy(x).to(
+                            device=device)))
+
                 # create obs dict
                 np_obs_dict = dict(obs)
-                if self.past_action and (past_action is not None):
-                    # TODO: not tested
-                    np_obs_dict['past_action'] = past_action[
-                        :,-(self.n_obs_steps-1):].astype(np.float32)
                 
                 # device transfer
                 obs_dict = dict_apply(np_obs_dict, 
@@ -290,8 +299,11 @@ class RobomimicImageRunner(BaseImageRunner):
                         device=device))
 
                 # run policy
+                # with torch.no_grad():
+                #     action_dict = policy.predict_action(obs_dict)
+
                 with torch.no_grad():
-                    action_dict = policy.predict_action(obs_dict)
+                    action_dict = policy.predict_action_v2(obs_dict_list)
 
                 # device_transfer
                 np_action_dict = dict_apply(action_dict,
@@ -308,6 +320,8 @@ class RobomimicImageRunner(BaseImageRunner):
                     env_action = self.undo_transform_action(action)
 
                 obs, reward, done, info = env.step(env_action)
+                # cyclic array
+                obs_list = obs_list[1:] + [obs]
                 done = np.all(done)
                 past_action = action
 
@@ -350,6 +364,8 @@ class RobomimicImageRunner(BaseImageRunner):
             name = prefix+'mean_score'
             value = np.mean(value)
             log_data[name] = value
+            # wandb.log({prefix[:-1]: value})
+            print({prefix[:-1]: [pipeline_degree, value]})
 
         return log_data
 

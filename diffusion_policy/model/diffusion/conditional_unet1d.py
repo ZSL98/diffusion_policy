@@ -106,12 +106,13 @@ class ConditionalUnet1D(nn.Module):
         start_dim = down_dims[0]
 
         dsed = diffusion_step_embed_dim
+        print("data_type: ", data_type)
         if data_type==torch.float:
             diffusion_step_encoder = nn.Sequential(
                 SinusoidalPosEmb(dsed),
-                nn.Linear(dsed, dsed * 4).to(torch.bfloat16),
-                nn.Mish().to(torch.bfloat16),
-                nn.Linear(dsed * 4, dsed).to(torch.bfloat16),
+                nn.Linear(dsed, dsed * 4),
+                nn.Mish(),
+                nn.Linear(dsed * 4, dsed),
             )
         elif data_type==torch.bfloat16:
             diffusion_step_encoder = nn.Sequential(

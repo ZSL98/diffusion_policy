@@ -266,5 +266,21 @@ class PushTImageRunner(BaseImageRunner):
             name = prefix+'mean_score'
             value = np.mean(value)
             log_data[name] = value
-            wandb.log({prefix[:-1]: {"pipeline_degree":pipeline_degree, "accuracy":value}})
+            # wandb.log({prefix[:-1]: value})
+
+            file_name = os.getenv('OUTPUT_PTH', 'output.txt')
+
+            context_update = int(os.getenv('CONTEXT_UPDATE', 0))
+            pipeline_degree = int(os.getenv('PIPE_DEGREE', 1))
+            inference_step = int(os.getenv('INF_STEP', 100))
+            skewness = float(os.getenv('SKEW', 0.0))
+
+            data = [context_update, pipeline_degree, inference_step, skewness, prefix[:-1], value]
+            # Open the file in append mode
+            with open(file_name, "a") as file:
+                # Convert the list to a string and join elements with a separator (e.g., comma or space)
+                line = " ".join(map(str, data))
+                # Write the line to the file, adding a newline character
+                file.write(line + "\n")
+
         return log_data

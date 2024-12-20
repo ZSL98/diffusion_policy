@@ -14,11 +14,11 @@ for value in "${context_update[@]}"; do
             for skew in "${skewness[@]}"; do
                 export SKEW="$skew"
                 echo "Running Python script with PIPE_DEGREE=$PIPE_DEGREE"
-                python eval.py --checkpoint data/pusht/cnn/epoch\=1850-test_mean_score\=0.898.ckpt \
-                                    --output_dir data/pusht/eval_output --device cuda:0 -r 0003
+                # python eval.py --checkpoint data/pusht/cnn/epoch\=1850-test_mean_score\=0.898.ckpt \
+                #                     --output_dir data/pusht/eval_output --device cuda:0 -r 0003
                 
-                # python eval.py --checkpoint data/pusht/transformer/epoch\=0400-test_mean_score\=0.817.ckpt \
-                #                 --output_dir data/pusht/eval_output --device cuda:0 -r 0004
+                python eval.py --checkpoint data/pusht/transformer/epoch\=0400-test_mean_score\=0.817.ckpt \
+                                --output_dir data/pusht/eval_output --device cuda:0 -r 0004
 
                 # python eval.py --checkpoint data/can_mh/cnn/latest.ckpt --output_dir data/can_mh/eval_output --device cuda:0 -r 1005
                 # python eval.py --checkpoint data/can_mh/transformer/latest.ckpt --output_dir data/can_mh/eval_output --device cuda:0 -r 1006
