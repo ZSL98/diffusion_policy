@@ -15,6 +15,15 @@ def split_with_skew(N, M, alpha):
     reversed_accumulated = accumulated[::-1]
     return reversed_accumulated[1:]
 
+def split_with_skew_no_acc(N, M, alpha):
+    weights = np.exp(alpha * np.arange(1, M + 1))
+    normalized_weights = weights / weights.sum() * N
+    parts = np.round(normalized_weights).astype(int)
+    diff = N - parts.sum()
+    for i in range(abs(diff)):
+        parts[i % M] += np.sign(diff)
+    return list(parts)
+
 def dict_apply(
         x: Dict[str, torch.Tensor], 
         func: Callable[[torch.Tensor], torch.Tensor]
